@@ -16,13 +16,18 @@ jobs:
   fetch-fund-list:
     runs-on: ubuntu-latest
     steps:
-      - name: Fetch Fund List
+      - name: Fetch Fund List and Generate Image
         run: |
+          pip install matplotlib --quiet
           python3 - <<'EOF'
           import urllib.request
           import urllib.parse
           import json
           import time
+          import matplotlib
+          matplotlib.use('Agg')
+          import matplotlib.pyplot as plt
+          import matplotlib.font_manager as fm
 
           fund_type = "${{ github.event.inputs.fund_type }}"
           page_size = "${{ github.event.inputs.page_size }}"
@@ -54,9 +59,8 @@ jobs:
               items = items[0]
 
           print(f"共 {total} 只基金，显示前 {len(items)} 条：")
-          print()
-          print(f"{'基金名称':<20} {'基金代码':<10} {'涨跌幅':>8}")
-          print("-" * 42)
+
+          rows = []
           for item in items:
               name = item.get("SHORTNAME", "-")
               code = item.get("FCODE", "-")
@@ -66,6 +70,64 @@ jobs:
                   sign = "+" if change_f >= 0 else ""
                   change_str = f"{sign}{change_f:.2f}%"
               except (ValueError, TypeError):
+                  change_f = 0
                   change_str = str(change)
-              print(f"{name:<20} {code:<10} {change_str:>8}")
+              rows.append((name, code, change_str, change_f))
+
+          # install Chinese font
+          import subprocess
+          subprocess.run(["apt-get", "install", "-y", "-q", "fonts-noto-cjk"], capture_output=True)
+          fm._load_fontmanager(try_read_cache=False)
+          cjk_fonts = [f for f in fm.findSystemFonts() if 'Noto' in f and 'CJK' in f]
+          font_prop = fm.FontProperties(fname=cjk_fonts[0]) if cjk_fonts else None
+
+          col_labels = ["基金名称", "基金代码", "涨跌幅"]
+          table_data = [[r[0], r[1], r[2]] for r in rows]
+          cell_colors = []
+          for r in rows:
+              if r[3] > 0:
+                  color = (1.0, 0.88, 0.88)  # light red
+              elif r[3] < 0:
+                  color = (0.88, 1.0, 0.88)  # light green
+              else:
+                  color = (1.0, 1.0, 1.0)
+              cell_colors.append(["#f5f5f5", "#f5f5f5", color])
+
+          fig_height = max(4, len(rows) * 0.45 + 1.2)
+          fig, ax = plt.subplots(figsize=(9, fig_height))
+          ax.axis('off')
+
+          fp = font_prop
+          title_text = f"基金涨跌幅排行（共 {total} 只，显示前 {len(rows)} 条）"
+          ax.set_title(title_text, fontproperties=fp, fontsize=13, pad=12)
+
+          tbl = ax.table(
+              cellText=table_data,
+              colLabels=col_labels,
+              cellColours=cell_colors,
+              loc='center',
+              cellLoc='center',
+          )
+          tbl.auto_set_font_size(False)
+          tbl.set_fontsize(10)
+          tbl.auto_set_column_width([0, 1, 2])
+
+          for (row, col), cell in tbl.get_celld().items():
+              if fp:
+                  cell.get_text().set_fontproperties(fp)
+              if row == 0:
+                  cell.set_facecolor('#4472C4')
+                  cell.get_text().set_color('white')
+                  cell.set_text_props(fontweight='bold')
+
+          plt.tight_layout()
+          plt.savefig('fund_list.png', dpi=150, bbox_inches='tight')
+          print("图片已保存: fund_list.png")
           EOF
+
+      - name: Upload Image
+        uses: actions/upload-artifact@v4
+        with:
+          name: fund-list-chart
+          path: fund_list.png
+          retention-days: 7
