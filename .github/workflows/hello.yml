@@ -1,13 +1,23 @@
-name: Hello World
+name: Fetch Fund List
 
 on:
-  push:
   workflow_dispatch:
 
 jobs:
-  hello:
+  fetch-fund-list:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Print hello world
-        run: echo "hello world!"
+      - name: Call Eastmoney fund API
+        run: |
+          curl -s "https://fundmobapi.eastmoney.com/FundMNewApi/FundMNNetNewList?FundType=0&SortColumn=RZDF&pageIndex=1&pageSize=20&plat=Iphone&deviceid=1737000000000000000&product=EFund&version=6.4.5" \
+            -H "User-Agent: Mozilla/5.0" \
+            -o fund.json
+
+      - name: Print formatted fund list
+        run: |
+          echo "基金列表："
+          jq -r '
+            .Datas[] |
+            "代码: \(.FCODE) | 名称: \(.SHORTNAME) | 类型: \(.FUNDTYPE) | 净值: \(.DWJZ) | 日涨跌幅: \(.RZDF)% | 申购状态: \(.SGZT)"
+          ' fund.json
